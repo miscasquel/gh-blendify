@@ -14,33 +14,25 @@ namespace Blendify
     /// Per-canvas gesture router. Implements the Blender-style input scheme:
     ///
     ///   MMB drag                      pan
-    ///   LMB click (empty canvas)      open component search
-    ///   Shift + RMB drag on a wire    insert a Relay (reroute)
+    ///   Shift + RMB sweep across      insert a Relay (reroute)
+    ///   a wire
     ///   Ctrl + RMB drag across wires  cut them
     ///   drag from a socket, drop on   open component search and auto-connect
     ///   empty canvas                  the created component
     /// </summary>
     internal sealed class CanvasState
     {
-        private const int ClickSlopPixels = 4;
         private const int DragSlopPixels = 4;
-        private const long SearchDismissWindow = 250;
 
         private readonly GH_Canvas _canvas;
 
         // Left button bookkeeping for the current gesture.
         private Point _downControl;
-        private bool _downWasEmpty;
         private IGH_Param _gripParam;
         private bool _gripFromInput;
 
         // Link-drag search: the socket a wire was pulled from.
         private PendingConnect _pending;
-
-        // Click-to-search: the popup we opened (if any).
-        private GH_PopupSearchDialog _search;
-        private long _searchClosedTick = -100000;
-        private bool _suppressClickSearch;
 
         public CanvasState(GH_Canvas canvas)
         {
@@ -54,13 +46,9 @@ namespace Blendify
 
             _pending = null;
             _gripParam = null;
-            _downWasEmpty = false;
 
             if (document == null || !canvas.ModifiersEnabled)
                 return;
-
-            // If a search popup just closed because of this very click, do not reopen it.
-            _suppressClickSearch = Environment.TickCount64 - _searchClosedTick <= SearchDismissWindow;
 
             var mouseEvent = new GH_CanvasMouseEvent(canvas.Viewport, e);
 
@@ -77,11 +65,7 @@ namespace Blendify
                     if ((modifiers & Keys.Shift) != Keys.None)
                     {
                         // Blender: Shift+RMB sweep across a wire inserts a Reroute (Relay).
-                        IGH_Param source = null, target = null;
-                        canvas.ActiveInteraction =
-                            document.FindWireAt(mouseEvent.CanvasLocation, GhOps.WireHitRadius, ref source, ref target)
-                                ? new RelayInteraction(canvas, mouseEvent, source, target)
-                                : null; // Claim the gesture but do nothing (no pan).
+                        canvas.ActiveInteraction = new RelayInteraction(canvas, mouseEvent);
                         return;
                     }
                     if ((modifiers & Keys.Control) != Keys.None)
@@ -105,10 +89,6 @@ namespace Blendify
                         _gripFromInput = IsInputGrip(grip, attributes, mouseEvent.CanvasX);
                     }
 
-                    _downWasEmpty = _gripParam == null
-                                    && !canvas.HasControlWithFocus
-                                    && !IsOverWidget(mouseEvent)
-                                    && IsEmptyCanvas(document, mouseEvent.CanvasLocation);
                     return;
                 }
             }
@@ -121,34 +101,27 @@ namespace Blendify
             if (document == null || e.Button != MouseButtons.Left)
                 return;
 
-            var movedPixels = Math.Abs(e.X - _downControl.X) + Math.Abs(e.Y - _downControl.Y);
-            var mouseEvent = new GH_CanvasMouseEvent(canvas.Viewport, e);
-
             var grip = _gripParam;
             var gripFromInput = _gripFromInput;
             _gripParam = null;
 
-            var dismissing = _suppressClickSearch;
-            _suppressClickSearch = false;
-
             // Blender link-drag search: a wire was dragged off a socket and dropped on empty
             // canvas. Grasshopper already released its wire interaction without connecting,
             // so open the search popup and remember the socket for auto-connection.
-            if (grip != null && movedPixels > DragSlopPixels && canvas.ActiveInteraction == null
-                && IsEmptyCanvas(document, mouseEvent.CanvasLocation))
-            {
-                var dialog = OpenSearch(canvas, canvas.PointToScreen(e.Location));
-                if (dialog != null)
-                    _pending = new PendingConnect(grip, gripFromInput, dialog);
+            if (grip == null)
                 return;
-            }
 
-            // Blender-ish click-to-add: a plain click on empty canvas opens the search popup.
-            if (dismissing)
+            var movedPixels = Math.Abs(e.X - _downControl.X) + Math.Abs(e.Y - _downControl.Y);
+            if (movedPixels <= DragSlopPixels)
                 return;
-            if (_downWasEmpty && Control.ModifierKeys == Keys.None
-                && movedPixels <= ClickSlopPixels && IsEmptyCanvas(document, mouseEvent.CanvasLocation))
-                OpenSearch(canvas, canvas.PointToScreen(e.Location));
+
+            var mouseEvent = new GH_CanvasMouseEvent(canvas.Viewport, e);
+            if (canvas.ActiveInteraction != null || !IsEmptyCanvas(document, mouseEvent.CanvasLocation))
+                return;
+
+            var dialog = OpenSearch(canvas, canvas.PointToScreen(e.Location));
+            if (dialog != null)
+                _pending = new PendingConnect(grip, gripFromInput, dialog);
         }
 
         public void OnKeyDown(object sender, KeyEventArgs e)
@@ -195,14 +168,8 @@ namespace Blendify
                 Canvas = canvas,
             };
 
-            _search = dialog;
             dialog.FormClosed += (s, e) =>
             {
-                if (ReferenceEquals(_search, dialog))
-                {
-                    _search = null;
-                    _searchClosedTick = Environment.TickCount64;
-                }
                 if (_pending != null && ReferenceEquals(_pending.Dialog, dialog))
                     _pending = null;
             };
@@ -222,20 +189,6 @@ namespace Blendify
 
             IGH_Param source = null, target = null;
             return !document.FindWireAt(point, GhOps.WireHitRadius, ref source, ref target);
-        }
-
-        private bool IsOverWidget(GH_CanvasMouseEvent e)
-        {
-            var widgets = _canvas.Widgets;
-            if (widgets == null)
-                return false;
-
-            foreach (var widget in widgets)
-            {
-                if (widget.Visible && widget.Contains(e.ControlLocation, e.CanvasLocation))
-                    return true;
-            }
-            return false;
         }
 
         private static bool IsInputGrip(IGH_Param param, IGH_Attributes attributes, float canvasX)

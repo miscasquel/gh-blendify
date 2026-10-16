@@ -11,8 +11,7 @@ Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
 | Gesture | Behaviour |
 | --- | --- |
 | **Middle mouse drag** | Pan the canvas (replaces GH's MMB radial menu; space bar still opens it). |
-| **Left click on empty canvas** | Open the component search popup at the cursor. |
-| **Shift + right-drag across a wire** | Insert a Relay (reroute) and slide it along the wire. |
+| **Shift + right-drag across a wire** | Insert a Relay (reroute) where the stroke crosses the wire; the relay follows the drag. A Shift+RMB click on a wire inserts one at that point. |
 | **Ctrl + right-drag across wires** | Cut every wire the stroke crosses (single undo step). |
 | **Drag from a socket, drop on empty canvas** | Open the component search; the created component is auto-connected to that socket when a compatible one exists. |
 
@@ -21,7 +20,7 @@ selection, double-click search, `Ctrl+Z` undo (all Blendify edits are undoable).
 
 ## Status
 
-- All five gestures are implemented, and the plugin compiles against the Rhino 8
+- All gestures listed above are implemented, and the plugin compiles against the Rhino 8
   Grasshopper assemblies.
 - Runtime behaviour has **not** been manually verified inside Rhino yet — testing is the
   next milestone before anything here is called stable.

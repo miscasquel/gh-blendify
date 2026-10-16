@@ -326,7 +326,7 @@ namespace Blendify
             return Distance(p, new PointF(a.X + t * dx, a.Y + t * dy));
         }
 
-        private static float Distance(PointF a, PointF b)
+        public static float Distance(PointF a, PointF b)
         {
             float dx = a.X - b.X;
             float dy = a.Y - b.Y;
