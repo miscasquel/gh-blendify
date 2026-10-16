@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>Blendify</AssemblyName>
+    <RootNamespace>Blendify</RootNamespace>
+    <!-- Grasshopper plugins ship as .gha -->
+    <TargetExt>.gha</TargetExt>
+    <Version>0.0.1</Version>
+    <Product>Blendify</Product>
+    <Description>Blender-style mouse controls for the Grasshopper canvas. Work in progress.</Description>
+    <Authors>miscasquel</Authors>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+    <!-- Rhino/Grasshopper assemblies come from the host; never copy them next to the plugin. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>embedded</DebugType>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grasshopper" Version="8.35.26251.13001" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+</Project>
