@@ -11,7 +11,7 @@ Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
 | Gesture | Behaviour |
 | --- | --- |
 | **Middle mouse drag** | Pan the canvas (replaces GH's MMB radial menu; space bar still opens it). |
-| **Shift + right-drag across a wire** | Insert a Relay (reroute) where the stroke crosses the wire; the relay follows the drag. A Shift+RMB click on a wire inserts one at that point. |
+| **Shift + right-drag across wires** | Insert a Relay into every wire the stroke crosses (one undo step per sweep); a trail is drawn while dragging. A Shift+RMB click inserts a relay on the nearest wire. |
 | **Ctrl + right-drag across wires** | Cut every wire the stroke crosses (single undo step). |
 | **Drag from a socket, drop on empty canvas** | Open the component search; the created component is auto-connected to that socket when a compatible one exists. |
 

@@ -147,8 +147,12 @@ namespace Blendify
             return result;
         }
 
-        /// <summary>Inserts a relay into an existing wire, mirroring Grasshopper's own double-click behaviour.</summary>
-        public static GH_Relay InsertRelay(GH_Document document, IGH_Param source, IGH_Param target, PointF location)
+        /// <summary>
+        /// Inserts a relay into an existing wire, mirroring Grasshopper's own double-click
+        /// behaviour. The undo actions are appended to <paramref name="record"/> so a caller
+        /// can merge several insertions into one undo step.
+        /// </summary>
+        public static GH_Relay InsertRelay(GH_Document document, IGH_Param source, IGH_Param target, PointF location, GH_UndoRecord record)
         {
             var relay = new GH_Relay();
             relay.CreateAttributes();
@@ -157,14 +161,12 @@ namespace Blendify
             relay.ExpirePreview(false);
             document.AddObject(relay, false, int.MaxValue);
 
-            var record = new GH_UndoRecord("Blendify: Insert Relay");
             record.AddAction(new GH_AddObjectAction(relay));
             record.AddAction(new GH_WireAction(relay));
             relay.AddSource(source);
             relay.ResolveDisplayName();
             record.AddAction(new GH_WireAction(target));
             target.ReplaceSource(source, relay);
-            document.UndoUtil.RecordEvent(record);
             relay.ExpireSolution(true);
             return relay;
         }
