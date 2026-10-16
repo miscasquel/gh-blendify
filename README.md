@@ -1,8 +1,7 @@
 # Blendify
 
-**v0.0.1 — work in progress.** This project is under heavy development: expect rough
-edges, breaking changes, and treat everything below as *implemented but pending manual
-verification in Rhino*.
+**v0.1.0 — work in progress.** This project is under active development: expect rough
+edges and breaking changes.
 
 Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
 
@@ -20,12 +19,10 @@ selection, double-click search, `Ctrl+Z` undo (all Blendify edits are undoable).
 
 ## Status
 
-- All gestures listed above are implemented, and the plugin compiles against the Rhino 8
-  Grasshopper assemblies.
-- Runtime behaviour has **not** been manually verified inside Rhino yet — testing is the
-  next milestone before anything here is called stable.
-- API surface, gesture set and internals may change without notice. No stability
-  guarantees before v0.1.0.
+- All gestures listed above are implemented and were exercised by hand in Rhino 8; the
+  plugin compiles against the Rhino 8 Grasshopper assemblies.
+- API surface, gesture set and internals may change without notice; this is still early
+  software.
 
 ## Philosophy
 
