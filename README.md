@@ -11,7 +11,7 @@ Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
 | Gesture | Behaviour |
 | --- | --- |
 | **Middle mouse drag** | Pan the canvas (replaces GH's MMB radial menu; space bar still opens it). |
-| **Shift + right-drag across wires** | Insert a Relay into every wire the stroke crosses (one undo step per sweep); a trail is drawn while dragging. A Shift+RMB click inserts a relay on the nearest wire. |
+| **Shift + right-drag across wires** | On release, insert a single Relay that merges every wire the stroke crosses: all swept sources feed the relay and each swept link is rerouted through it (one undo step). A trail and wire highlights preview the merge while dragging; a Shift+RMB click relays the nearest wire. |
 | **Ctrl + right-drag across wires** | Cut every wire the stroke crosses (single undo step). |
 | **Drag from a socket, drop on empty canvas** | Open the component search; the created component is auto-connected to that socket when a compatible one exists. |
 
@@ -52,6 +52,10 @@ folder and restart Grasshopper).
 - The link-search popup is Grasshopper's own search dialog, so the hit list is not
   type-filtered; Blendify picks the best compatible socket on the new component and
   wires it automatically (exact type match > assignable > generic).
+- A relay merge joins data streams: one relay carries one stream, so the targets of the
+  merged wires receive the combined data. Sweeping across wires that chain into each
+  other (e.g. `A→B` and `B→C`) therefore creates a loop, which Grasshopper reports as a
+  cyclic data flow.
 
 ## Build
 

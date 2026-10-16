@@ -4,20 +4,25 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using Grasshopper.GUI;
 using Grasshopper.GUI.Canvas;
 using Grasshopper.GUI.Canvas.Interaction;
 using Grasshopper.Kernel;
-using Grasshopper.Kernel.Undo;
 
 namespace Blendify
 {
     /// <summary>
-    /// Blender-style Shift+RMB reroute insertion: drag the right mouse button across wires
-    /// and every wire the stroke touches gets a Relay inserted (a trail is drawn while
-    /// sweeping). A Shift+RMB click inserts a single relay on the nearest wire.
-    /// All insertions of one gesture share a single undo step.
+    /// Blender-style Shift+RMB relay gesture:
+    ///
+    ///   drag across wires  a trail and wire highlights preview the merge while dragging;
+    ///                      on release a single Relay appears that every swept wire merges
+    ///                      into (one undo step)
+    ///   click on a wire    relays the nearest wire
+    ///
+    /// Merge semantics: all swept sources feed the relay, and each swept link is rerouted so
+    /// its target reads from the relay.
     /// </summary>
     internal sealed class RelayInteraction : GH_AbstractInteraction
     {
@@ -25,14 +30,16 @@ namespace Blendify
         private const float ClickTravelLimit = 8f;       // below this the gesture counts as a click
 
         private static readonly Pen TrailPen = new Pen(Color.FromArgb(230, 90, 200, 255), 1.6f);
+        private static readonly Pen HitPen = new Pen(Color.FromArgb(255, 255, 200, 40), 3.5f)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+        };
 
         private readonly GH_Canvas _canvas;
         private readonly GH_Document _document;
         private readonly List<PointF> _stroke = new List<PointF>();
-        private readonly HashSet<IGH_Param> _relays = new HashSet<IGH_Param>();
-        private readonly GH_UndoRecord _undo = new GH_UndoRecord("Blendify: Insert Relay");
-
-        private bool _committed;
+        private List<WireInfo> _hit = new List<WireInfo>();
 
         public RelayInteraction(GH_Canvas canvas, GH_CanvasMouseEvent e)
             : base(canvas, e, false)
@@ -49,7 +56,7 @@ namespace Blendify
                 return GH_ObjectResponse.Release;
 
             Append(e.CanvasLocation);
-            Update(e.CanvasLocation);
+            RefreshHits(e.CanvasLocation);
             sender.Invalidate();
             return GH_ObjectResponse.Handled;
         }
@@ -57,73 +64,31 @@ namespace Blendify
         public override GH_ObjectResponse RespondToMouseUp(GH_Canvas sender, GH_CanvasMouseEvent e)
         {
             Append(e.CanvasLocation);
-            Update(e.CanvasLocation);
-            CommitUndo();
+            RefreshHits(e.CanvasLocation);
+
+            if (_hit.Count > 0)
+            {
+                GhOps.MergeWires(_document, _hit, NearestPointOnWires(_hit, e.CanvasLocation));
+                _hit.Clear();
+            }
+
             sender.Invalidate();
             return GH_ObjectResponse.Release;
         }
 
         public override void Destroy()
         {
-            CommitUndo();
             _canvas.CanvasPostPaintObjects -= DrawOverlay;
             base.Destroy();
         }
 
-        private void CommitUndo()
-        {
-            if (_committed || _undo.ActionCount == 0)
-                return;
-
-            _committed = true;
-            _document.UndoUtil.RecordEvent(_undo);
-        }
-
-        private void Update(PointF cursor)
+        private void RefreshHits(PointF cursor)
         {
             bool click = Travel() <= ClickTravelLimit;
             var wires = GhOps.FindWiresAlong(_document, _stroke, click ? GhOps.WireHitRadius : StrokeTolerance);
-            if (wires.Count == 0)
-                return;
-
-            if (click)
-            {
-                TryInsert(NearestWire(wires, cursor), cursor);
-                return;
-            }
-
-            foreach (var wire in wires)
-                TryInsert(wire, cursor);
-        }
-
-        private void TryInsert(WireInfo wire, PointF cursor)
-        {
-            // After insertion a relay splits the wire into (source -> relay) and
-            // (relay -> target); skipping anything connected to a relay of this gesture
-            // prevents chains, while untouched wires keep getting their own relay.
-            if (_relays.Contains(wire.Source) || _relays.Contains(wire.Target))
-                return;
-
-            var location = GhOps.NearestPointOnWire(wire.Source, wire.Target, cursor);
-            var relay = GhOps.InsertRelay(_document, wire.Source, wire.Target, location, _undo);
-            _relays.Add(relay);
-        }
-
-        private static WireInfo NearestWire(List<WireInfo> wires, PointF cursor)
-        {
-            var best = wires[0];
-            float bestDistance = float.MaxValue;
-            foreach (var wire in wires)
-            {
-                var point = GhOps.NearestPointOnWire(wire.Source, wire.Target, cursor);
-                float distance = GhOps.Distance(point, cursor);
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    best = wire;
-                }
-            }
-            return best;
+            if (click && wires.Count > 1)
+                wires = new List<WireInfo> { NearestWire(wires, cursor) };
+            _hit = wires;
         }
 
         private void Append(PointF point)
@@ -144,13 +109,57 @@ namespace Blendify
             return travel;
         }
 
+        private static WireInfo NearestWire(List<WireInfo> wires, PointF cursor)
+        {
+            var best = wires[0];
+            float bestDistance = float.MaxValue;
+            foreach (var wire in wires)
+            {
+                var point = GhOps.NearestPointOnWire(wire.Source, wire.Target, cursor);
+                float distance = GhOps.Distance(point, cursor);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = wire;
+                }
+            }
+            return best;
+        }
+
+        private static PointF NearestPointOnWires(List<WireInfo> wires, PointF cursor)
+        {
+            var best = wires[0].Source.Attributes.OutputGrip;
+            float bestDistance = float.MaxValue;
+            foreach (var wire in wires)
+            {
+                var point = GhOps.NearestPointOnWire(wire.Source, wire.Target, cursor);
+                float distance = GhOps.Distance(point, cursor);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = point;
+                }
+            }
+            return best;
+        }
+
         private void DrawOverlay(GH_Canvas sender)
         {
             var graphics = sender.Graphics;
-            if (graphics == null || _stroke.Count < 2)
+            if (graphics == null)
                 return;
 
-            graphics.DrawLines(TrailPen, _stroke.ToArray());
+            foreach (var wire in _hit)
+            {
+                var sourceAttributes = wire.Source.Attributes;
+                var targetAttributes = wire.Target.Attributes;
+                if (sourceAttributes == null || targetAttributes == null)
+                    continue;
+                graphics.DrawLines(HitPen, GhOps.WirePolyline(sourceAttributes.OutputGrip, targetAttributes.InputGrip));
+            }
+
+            if (_stroke.Count > 1)
+                graphics.DrawLines(TrailPen, _stroke.ToArray());
         }
     }
 }

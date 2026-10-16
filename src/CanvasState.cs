@@ -14,8 +14,8 @@ namespace Blendify
     /// Per-canvas gesture router. Implements the Blender-style input scheme:
     ///
     ///   MMB drag                      pan
-    ///   Shift + RMB sweep across      insert Relays (reroutes)
-    ///   wires
+    ///   Shift + RMB sweep across      merge swept wires into one
+    ///   wires                         Relay (reroute hub)
     ///   Ctrl + RMB drag across wires  cut them
     ///   drag from a socket, drop on   open component search and auto-connect
     ///   empty canvas                  the created component

@@ -148,26 +148,48 @@ namespace Blendify
         }
 
         /// <summary>
-        /// Inserts a relay into an existing wire, mirroring Grasshopper's own double-click
-        /// behaviour. The undo actions are appended to <paramref name="record"/> so a caller
-        /// can merge several insertions into one undo step.
+        /// Merges the given wires into a single relay: every distinct source feeds the relay
+        /// and each swept link is rerouted so its target reads from the relay instead.
+        /// All changes share one undo step.
         /// </summary>
-        public static GH_Relay InsertRelay(GH_Document document, IGH_Param source, IGH_Param target, PointF location, GH_UndoRecord record)
+        public static GH_Relay MergeWires(GH_Document document, List<WireInfo> wires, PointF location)
         {
             var relay = new GH_Relay();
             relay.CreateAttributes();
             relay.Attributes.Pivot = location;
-            relay.WireDisplay = target.WireDisplay;
+            relay.WireDisplay = wires[0].Target.WireDisplay;
             relay.ExpirePreview(false);
             document.AddObject(relay, false, int.MaxValue);
 
+            var record = new GH_UndoRecord("Blendify: Insert Relay");
             record.AddAction(new GH_AddObjectAction(relay));
             record.AddAction(new GH_WireAction(relay));
-            relay.AddSource(source);
+
+            var sources = new HashSet<IGH_Param>();
+            foreach (var wire in wires)
+                sources.Add(wire.Source);
+            foreach (var source in sources)
+                relay.AddSource(source);
             relay.ResolveDisplayName();
-            record.AddAction(new GH_WireAction(target));
-            target.ReplaceSource(source, relay);
+
+            var targets = new HashSet<IGH_Param>();
+            foreach (var wire in wires)
+            {
+                if (targets.Add(wire.Target))
+                    record.AddAction(new GH_WireAction(wire.Target));
+            }
+
+            foreach (var wire in wires)
+            {
+                if (targets.Remove(wire.Target))
+                    wire.Target.ReplaceSource(wire.Source, relay);
+                else
+                    wire.Target.RemoveSource(wire.Source);
+            }
+
+            document.UndoUtil.RecordEvent(record);
             relay.ExpireSolution(true);
+            document.NewSolution(false);
             return relay;
         }
 
