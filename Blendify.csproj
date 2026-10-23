@@ -11,7 +11,7 @@
     <RootNamespace>Blendify</RootNamespace>
     <!-- Grasshopper plugins ship as .gha -->
     <TargetExt>.gha</TargetExt>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Product>Blendify</Product>
     <Description>Blender-style mouse controls for the Grasshopper canvas. Work in progress.</Description>
     <Authors>miscasquel</Authors>

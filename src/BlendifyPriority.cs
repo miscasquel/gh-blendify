@@ -14,6 +14,7 @@ namespace Blendify
     {
         public override GH_LoadingInstruction PriorityLoad()
         {
+            MmbInputFilter.Install();
             Instances.CanvasCreated += CanvasHooks.OnCanvasCreated;
 
             // The editor may already exist when the plugin is (re)loaded.

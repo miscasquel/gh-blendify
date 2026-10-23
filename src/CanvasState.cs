@@ -55,7 +55,10 @@ namespace Blendify
             switch (e.Button)
             {
                 case MouseButtons.Middle:
-                    // Blender: MMB drag pans. Replaces Grasshopper's MMB radial menu.
+                    // Blender: MMB drag pans. Normally MmbInputFilter claims the button
+                    // before GH sees it; this is the fallback if the filter is unavailable.
+                    if (canvas.ActiveInteraction is MmbPanInteraction)
+                        return;
                     canvas.ActiveInteraction = new MmbPanInteraction(canvas, mouseEvent);
                     return;
 

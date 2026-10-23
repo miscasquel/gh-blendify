@@ -17,11 +17,19 @@ namespace Blendify
         {
             if (canvas == null)
                 return;
+
+            // Run on the canvas' UI thread so the middle-button filter catches MMB before
+            // Grasshopper's own canvas handler can open the radial menu.
+            MmbInputFilter.Install();
+
             if (States.TryGetValue(canvas, out _))
                 return;
 
             var state = new CanvasState(canvas);
             States.Add(canvas, state);
+
+            // Backstop in case the message filter is bypassed by the host's message loop.
+            canvas.AddValidator(new MmbCanvasValidator());
 
             // Grasshopper subscribes its own handlers in the GH_Canvas constructor, so ours
             // run afterwards and see whatever the default behaviour already prepared
