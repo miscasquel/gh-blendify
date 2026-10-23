@@ -33,14 +33,24 @@ be ignored; forks are welcome.
 
 ## Install
 
-Build `Blendify.gha` and copy it into Grasshopper's libraries folder:
+Download `Blendify.gha` from the
+[latest release](https://github.com/miscasquel/gh-blendify/releases/latest) — no
+compiler or .NET SDK needed.
 
-```
-%APPDATA%\Grasshopper\Libraries\Blendify.gha
-```
+1. Close Rhino.
+2. If Windows marked the download as blocked, right-click the file → *Properties* →
+   tick *Unblock* → *OK*.
+3. Copy `Blendify.gha` into Grasshopper's libraries folder:
 
-Then restart Rhino (or use *File → Special Folders → Components Folder* to locate the
-folder and restart Grasshopper).
+   ```
+   %APPDATA%\Grasshopper\Libraries\Blendify.gha
+   ```
+
+4. Start Rhino; Blendify loads automatically. (In Grasshopper, *File → Special Folders
+   → Components Folder* opens the same folder.)
+
+`Blendify.gha` is a single plugin assembly; it uses the Grasshopper assemblies that ship
+with Rhino, so there is nothing else to install.
 
 ## Notes
 
