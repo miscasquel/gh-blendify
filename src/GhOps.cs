@@ -275,29 +275,25 @@ namespace Blendify
                 return;
             }
 
+            var wirePoints = new List<PointF>();
             for (int s = 0; s + 1 < stroke.Count; s++)
             {
                 var a = stroke[s];
                 var b = stroke[s + 1];
                 for (int i = 0; i + 1 < curve.Length; i++)
                 {
-                    var c = curve[i];
-                    var d = curve[i + 1];
-                    if (TrySegmentIntersection(a, b, c, d, out var point))
-                    {
-                        AddUnique(points, point);
-                        continue;
-                    }
-
-                    if (DistancePointSegment(c, a, b) <= tolerance
-                        || DistancePointSegment(d, a, b) <= tolerance
-                        || DistancePointSegment(a, c, d) <= tolerance
-                        || DistancePointSegment(b, c, d) <= tolerance)
-                    {
-                        AddUnique(points, ClosestPointOnWire(a, b, c, d));
-                    }
+                    if (TrySegmentIntersection(a, b, curve[i], curve[i + 1], out var point))
+                        AddUnique(wirePoints, point);
                 }
             }
+
+            // A tolerance-only hit has no mathematical intersection; use its nearest
+            // touch point as a single contribution instead.
+            if (wirePoints.Count == 0)
+                AddClosestPoint(wirePoints, stroke, curve, tolerance);
+
+            foreach (var point in wirePoints)
+                AddUnique(points, point);
         }
 
         private static void AddClosestPoint(
@@ -316,6 +312,34 @@ namespace Blendify
                 {
                     bestDistance = distance;
                     best = candidate;
+                }
+            }
+
+            if (bestDistance <= tolerance)
+                AddUnique(points, best);
+        }
+
+        private static void AddClosestPoint(
+            List<PointF> points,
+            IReadOnlyList<PointF> stroke,
+            PointF[] curve,
+            float tolerance)
+        {
+            var best = curve[0];
+            float bestDistance = float.MaxValue;
+            for (int s = 0; s + 1 < stroke.Count; s++)
+            {
+                var a = stroke[s];
+                var b = stroke[s + 1];
+                for (int i = 0; i + 1 < curve.Length; i++)
+                {
+                    var candidate = ClosestPointOnWire(a, b, curve[i], curve[i + 1]);
+                    float distance = DistancePointSegment(candidate, a, b);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        best = candidate;
+                    }
                 }
             }
 

@@ -126,7 +126,7 @@ namespace Blendify
                 graphics.DrawLines(HitPen, GhOps.WirePolyline(sourceAttributes.OutputGrip, targetAttributes.InputGrip));
             }
 
-            if (_stroke.Count > 1)
+            if (_stroke.Count > 1 && Travel() > DragThreshold)
                 graphics.DrawLines(TrailPen, _stroke.ToArray());
         }
     }
