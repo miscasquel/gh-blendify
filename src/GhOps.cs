@@ -42,6 +42,7 @@ namespace Blendify
 
         private const int HitSampleCount = 14;
         private const int DrawSampleCount = 24;
+        private const int IntersectionSampleCount = 48;
 
         private static float WireOffset(PointF source, PointF target)
         {
@@ -148,29 +149,41 @@ namespace Blendify
         }
 
         /// <summary>
-        /// Merges the given wires into a single relay: every distinct source feeds the relay
-        /// and each swept link is rerouted so its target reads from the relay instead.
-        /// All changes share one undo step.
+        /// Inserts one relay per distinct source among the given wires. Each relay is placed
+        /// at the midpoint of all stroke/wire intersections for that source, and every swept
+        /// link is rerouted so its target reads from its source's relay. All changes share one
+        /// undo step.
         /// </summary>
-        public static GH_Relay MergeWires(GH_Document document, List<WireInfo> wires, PointF location)
+        public static List<GH_Relay> MergeWires(
+            GH_Document document,
+            List<WireInfo> wires,
+            IReadOnlyList<PointF> stroke,
+            float tolerance)
         {
-            var relay = new GH_Relay();
-            relay.CreateAttributes();
-            relay.Attributes.Pivot = location;
-            relay.WireDisplay = wires[0].Target.WireDisplay;
-            relay.ExpirePreview(false);
-            document.AddObject(relay, false, int.MaxValue);
+            var groups = GroupWiresBySource(wires);
+            var relays = new List<GH_Relay>(groups.Count);
+            if (groups.Count == 0)
+                return relays;
 
-            var record = new GH_UndoRecord("Blendify: Insert Relay");
-            record.AddAction(new GH_AddObjectAction(relay));
-            record.AddAction(new GH_WireAction(relay));
+            var record = new GH_UndoRecord(
+                groups.Count == 1 ? "Blendify: Insert Relay" : "Blendify: Insert Relays");
 
-            var sources = new HashSet<IGH_Param>();
-            foreach (var wire in wires)
-                sources.Add(wire.Source);
-            foreach (var source in sources)
-                relay.AddSource(source);
-            relay.ResolveDisplayName();
+            foreach (var group in groups)
+            {
+                var relay = new GH_Relay();
+                relay.CreateAttributes();
+                relay.Attributes.Pivot = MidpointOfIntersections(group.Wires, stroke, tolerance);
+                relay.WireDisplay = group.Wires[0].Target.WireDisplay;
+                relay.ExpirePreview(false);
+                document.AddObject(relay, false, int.MaxValue);
+
+                record.AddAction(new GH_AddObjectAction(relay));
+                record.AddAction(new GH_WireAction(relay));
+
+                relay.AddSource(group.Source);
+                relay.ResolveDisplayName();
+                relays.Add(relay);
+            }
 
             var targets = new HashSet<IGH_Param>();
             foreach (var wire in wires)
@@ -179,18 +192,188 @@ namespace Blendify
                     record.AddAction(new GH_WireAction(wire.Target));
             }
 
-            foreach (var wire in wires)
+            for (int i = 0; i < groups.Count; i++)
             {
-                if (targets.Remove(wire.Target))
+                var relay = relays[i];
+                foreach (var wire in groups[i].Wires)
                     wire.Target.ReplaceSource(wire.Source, relay);
-                else
-                    wire.Target.RemoveSource(wire.Source);
             }
 
             document.UndoUtil.RecordEvent(record);
-            relay.ExpireSolution(true);
+            foreach (var relay in relays)
+                relay.ExpireSolution(true);
             document.NewSolution(false);
-            return relay;
+            return relays;
+        }
+
+        private static List<RelayGroup> GroupWiresBySource(List<WireInfo> wires)
+        {
+            var groups = new List<RelayGroup>();
+            var bySource = new Dictionary<IGH_Param, RelayGroup>(ReferenceEqualityComparer.Instance);
+            foreach (var wire in wires)
+            {
+                if (wire.Source == null)
+                    continue;
+
+                if (!bySource.TryGetValue(wire.Source, out var group))
+                {
+                    group = new RelayGroup(wire.Source);
+                    bySource.Add(wire.Source, group);
+                    groups.Add(group);
+                }
+                group.Wires.Add(wire);
+            }
+            return groups;
+        }
+
+        private static PointF MidpointOfIntersections(
+            List<WireInfo> wires,
+            IReadOnlyList<PointF> stroke,
+            float tolerance)
+        {
+            var points = new List<PointF>();
+            foreach (var wire in wires)
+                CollectIntersectionPoints(wire.Source, wire.Target, stroke, tolerance, points);
+
+            if (points.Count == 0)
+            {
+                var wire = wires[0];
+                if (stroke.Count > 0 && wire.Source.Attributes != null && wire.Target.Attributes != null)
+                    return NearestPointOnWire(wire.Source, wire.Target, stroke[stroke.Count - 1]);
+                return stroke.Count > 0 ? stroke[stroke.Count - 1] : PointF.Empty;
+            }
+
+            float x = 0f, y = 0f;
+            foreach (var point in points)
+            {
+                x += point.X;
+                y += point.Y;
+            }
+            return new PointF(x / points.Count, y / points.Count);
+        }
+
+        private static void CollectIntersectionPoints(
+            IGH_Param source,
+            IGH_Param target,
+            IReadOnlyList<PointF> stroke,
+            float tolerance,
+            List<PointF> points)
+        {
+            var sourceAttributes = source.Attributes;
+            var targetAttributes = target.Attributes;
+            if (sourceAttributes == null || targetAttributes == null)
+                return;
+
+            var curve = WirePolyline(
+                sourceAttributes.OutputGrip,
+                targetAttributes.InputGrip,
+                IntersectionSampleCount);
+
+            if (stroke.Count == 1)
+            {
+                AddClosestPoint(points, stroke[0], curve, tolerance);
+                return;
+            }
+
+            for (int s = 0; s + 1 < stroke.Count; s++)
+            {
+                var a = stroke[s];
+                var b = stroke[s + 1];
+                for (int i = 0; i + 1 < curve.Length; i++)
+                {
+                    var c = curve[i];
+                    var d = curve[i + 1];
+                    if (TrySegmentIntersection(a, b, c, d, out var point))
+                    {
+                        AddUnique(points, point);
+                        continue;
+                    }
+
+                    if (DistancePointSegment(c, a, b) <= tolerance
+                        || DistancePointSegment(d, a, b) <= tolerance
+                        || DistancePointSegment(a, c, d) <= tolerance
+                        || DistancePointSegment(b, c, d) <= tolerance)
+                    {
+                        AddUnique(points, ClosestPointOnWire(a, b, c, d));
+                    }
+                }
+            }
+        }
+
+        private static void AddClosestPoint(
+            List<PointF> points,
+            PointF point,
+            PointF[] curve,
+            float tolerance)
+        {
+            var best = curve[0];
+            float bestDistance = float.MaxValue;
+            for (int i = 0; i + 1 < curve.Length; i++)
+            {
+                var candidate = ClosestPointOnSegment(point, curve[i], curve[i + 1]);
+                float distance = Distance(point, candidate);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = candidate;
+                }
+            }
+
+            if (bestDistance <= tolerance)
+                AddUnique(points, best);
+        }
+
+        private static PointF ClosestPointOnWire(PointF a, PointF b, PointF c, PointF d)
+        {
+            var best = c;
+            float bestDistance = DistancePointSegment(c, a, b);
+
+            float distance = DistancePointSegment(d, a, b);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = d;
+            }
+
+            var candidate = ClosestPointOnSegment(a, c, d);
+            distance = DistancePointSegment(candidate, a, b);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = candidate;
+            }
+
+            candidate = ClosestPointOnSegment(b, c, d);
+            distance = DistancePointSegment(candidate, a, b);
+            if (distance < bestDistance)
+                best = candidate;
+
+            return best;
+        }
+
+        private static void AddUnique(List<PointF> points, PointF point)
+        {
+            const float epsilonSq = 4f; // 2 canvas units, to avoid segment-joint duplicates
+            foreach (var existing in points)
+            {
+                float dx = existing.X - point.X;
+                float dy = existing.Y - point.Y;
+                if (dx * dx + dy * dy <= epsilonSq)
+                    return;
+            }
+            points.Add(point);
+        }
+
+        private sealed class RelayGroup
+        {
+            public RelayGroup(IGH_Param source)
+            {
+                Source = source;
+                Wires = new List<WireInfo>();
+            }
+
+            public IGH_Param Source { get; }
+            public List<WireInfo> Wires { get; }
         }
 
         /// <summary>Removes the given wires in a single undo step.</summary>
@@ -336,19 +519,49 @@ namespace Blendify
                 && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
         }
 
-        private static float DistancePointSegment(PointF p, PointF a, PointF b)
+        private static bool TrySegmentIntersection(PointF a, PointF b, PointF c, PointF d, out PointF point)
+        {
+            float rx = b.X - a.X;
+            float ry = b.Y - a.Y;
+            float sx = d.X - c.X;
+            float sy = d.Y - c.Y;
+            float denominator = rx * sy - ry * sx;
+            if (Math.Abs(denominator) < 0.0001f)
+            {
+                point = PointF.Empty;
+                return false;
+            }
+
+            float qx = c.X - a.X;
+            float qy = c.Y - a.Y;
+            float t = (qx * sy - qy * sx) / denominator;
+            float u = (qx * ry - qy * rx) / denominator;
+            if (t < 0f || t > 1f || u < 0f || u > 1f)
+            {
+                point = PointF.Empty;
+                return false;
+            }
+
+            point = new PointF(a.X + t * rx, a.Y + t * ry);
+            return true;
+        }
+
+        private static PointF ClosestPointOnSegment(PointF p, PointF a, PointF b)
         {
             float dx = b.X - a.X;
             float dy = b.Y - a.Y;
             float lengthSq = dx * dx + dy * dy;
             if (lengthSq < 0.0001f)
-                return Distance(p, a);
+                return a;
 
             float t = ((p.X - a.X) * dx + (p.Y - a.Y) * dy) / lengthSq;
             if (t < 0f) t = 0f;
             else if (t > 1f) t = 1f;
-            return Distance(p, new PointF(a.X + t * dx, a.Y + t * dy));
+            return new PointF(a.X + t * dx, a.Y + t * dy);
         }
+
+        private static float DistancePointSegment(PointF p, PointF a, PointF b)
+            => Distance(p, ClosestPointOnSegment(p, a, b));
 
         public static float Distance(PointF a, PointF b)
         {

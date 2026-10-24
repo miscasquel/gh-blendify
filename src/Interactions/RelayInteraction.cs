@@ -16,18 +16,18 @@ namespace Blendify
     /// <summary>
     /// Blender-style Shift+RMB relay gesture:
     ///
-    ///   drag across wires  a trail and wire highlights preview the merge while dragging;
-    ///                      on release a single Relay appears that every swept wire merges
-    ///                      into (one undo step)
-    ///   click on a wire    relays the nearest wire
+    ///   drag across wires  a trail and wire highlights preview the relays while dragging;
+    ///                      on release one Relay is inserted per distinct source output,
+    ///                      placed at the midpoint of the stroke/wire intersections for
+    ///                      that source (one undo step)
     ///
-    /// Merge semantics: all swept sources feed the relay, and each swept link is rerouted so
-    /// its target reads from the relay.
+    /// Relay semantics: each relay carries one source stream and reroutes that source's
+    /// swept links through itself. A click with no drag does nothing.
     /// </summary>
     internal sealed class RelayInteraction : GH_AbstractInteraction
     {
         private const float StrokeTolerance = 4f;        // canvas units for sweep hits
-        private const float ClickTravelLimit = 8f;       // below this the gesture counts as a click
+        private const float DragThreshold = 8f;          // below this the gesture counts as a click
 
         private static readonly Pen TrailPen = new Pen(Color.FromArgb(230, 90, 200, 255), 1.6f);
         private static readonly Pen HitPen = new Pen(Color.FromArgb(255, 255, 200, 40), 3.5f)
@@ -56,7 +56,7 @@ namespace Blendify
                 return GH_ObjectResponse.Release;
 
             Append(e.CanvasLocation);
-            RefreshHits(e.CanvasLocation);
+            RefreshHits();
             sender.Invalidate();
             return GH_ObjectResponse.Handled;
         }
@@ -64,11 +64,11 @@ namespace Blendify
         public override GH_ObjectResponse RespondToMouseUp(GH_Canvas sender, GH_CanvasMouseEvent e)
         {
             Append(e.CanvasLocation);
-            RefreshHits(e.CanvasLocation);
+            RefreshHits();
 
             if (_hit.Count > 0)
             {
-                GhOps.MergeWires(_document, _hit, NearestPointOnWires(_hit, e.CanvasLocation));
+                GhOps.MergeWires(_document, _hit, _stroke, StrokeTolerance);
                 _hit.Clear();
             }
 
@@ -82,13 +82,15 @@ namespace Blendify
             base.Destroy();
         }
 
-        private void RefreshHits(PointF cursor)
+        private void RefreshHits()
         {
-            bool click = Travel() <= ClickTravelLimit;
-            var wires = GhOps.FindWiresAlong(_document, _stroke, click ? GhOps.WireHitRadius : StrokeTolerance);
-            if (click && wires.Count > 1)
-                wires = new List<WireInfo> { NearestWire(wires, cursor) };
-            _hit = wires;
+            if (Travel() <= DragThreshold)
+            {
+                _hit.Clear();
+                return;
+            }
+
+            _hit = GhOps.FindWiresAlong(_document, _stroke, StrokeTolerance);
         }
 
         private void Append(PointF point)
@@ -107,40 +109,6 @@ namespace Blendify
                 travel += Math.Abs(_stroke[i].Y - _stroke[i - 1].Y);
             }
             return travel;
-        }
-
-        private static WireInfo NearestWire(List<WireInfo> wires, PointF cursor)
-        {
-            var best = wires[0];
-            float bestDistance = float.MaxValue;
-            foreach (var wire in wires)
-            {
-                var point = GhOps.NearestPointOnWire(wire.Source, wire.Target, cursor);
-                float distance = GhOps.Distance(point, cursor);
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    best = wire;
-                }
-            }
-            return best;
-        }
-
-        private static PointF NearestPointOnWires(List<WireInfo> wires, PointF cursor)
-        {
-            var best = wires[0].Source.Attributes.OutputGrip;
-            float bestDistance = float.MaxValue;
-            foreach (var wire in wires)
-            {
-                var point = GhOps.NearestPointOnWire(wire.Source, wire.Target, cursor);
-                float distance = GhOps.Distance(point, cursor);
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    best = point;
-                }
-            }
-            return best;
         }
 
         private void DrawOverlay(GH_Canvas sender)
