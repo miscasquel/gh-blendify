@@ -34,12 +34,6 @@ namespace Blendify
     /// </summary>
     internal static class GhOps
     {
-        /// <summary>Canvas-space search radius for wires; Grasshopper itself uses 14 for double-click.</summary>
-        public const float WireHitRadius = 12f;
-
-        /// <summary>Canvas-space search radius for parameter grips (Grasshopper default is 12).</summary>
-        public const float GripHitRadius = 12f;
-
         private const int HitSampleCount = 14;
         private const int DrawSampleCount = 24;
         private const int IntersectionSampleCount = 48;

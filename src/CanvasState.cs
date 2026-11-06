@@ -6,6 +6,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using Grasshopper.GUI;
 using Grasshopper.GUI.Canvas;
+using Grasshopper.GUI.Canvas.Interaction;
 using Grasshopper.Kernel;
 
 namespace Blendify
@@ -17,19 +18,22 @@ namespace Blendify
     ///   Shift + RMB sweep across      merge swept wires into one
     ///   wires                         Relay (reroute hub)
     ///   Ctrl + RMB drag across wires  cut them
-    ///   drag from a socket, drop on   open component search and auto-connect
-    ///   empty canvas                  the created component
+    ///   drag a wire from a socket     open component search and auto-connect
+    ///   and release unconnected       the created component
     /// </summary>
     internal sealed class CanvasState
     {
-        private const int DragSlopPixels = 4;
+        // GH_WireInteraction searches this far for the socket a wire would connect to.
+        private const int WireTargetSearchRadius = 20;
 
         private readonly GH_Canvas _canvas;
 
-        // Left button bookkeeping for the current gesture.
-        private Point _downControl;
-        private IGH_Param _gripParam;
-        private bool _gripFromInput;
+        // Wire-drag bookkeeping. Grasshopper owns the drag itself; we only remember
+        // what its GH_WireInteraction reports while the wire is on the cursor.
+        private bool _wireDragArmed;
+        private bool _wireDragHasTarget;
+        private IGH_Param _wireDragSource;
+        private bool _wireDragFromInput;
 
         // Link-drag search: the socket a wire was pulled from.
         private PendingConnect _pending;
@@ -45,7 +49,7 @@ namespace Blendify
             var document = canvas.Document;
 
             _pending = null;
-            _gripParam = null;
+            ResetWireDrag();
 
             if (document == null || !canvas.ModifiersEnabled)
                 return;
@@ -79,61 +83,84 @@ namespace Blendify
                     }
                     return; // Plain RMB: Grasshopper context menu.
                 }
+            }
+        }
 
-                case MouseButtons.Left:
+        public void OnMouseMove(object sender, MouseEventArgs e)
+        {
+            var canvas = _canvas;
+
+            if (canvas.ActiveInteraction is GH_WireInteraction wire)
+            {
+                if (!wire.IsActive)
+                    return;
+
+                if (!TryCaptureWireDragSource(wire))
                 {
-                    _downControl = e.Location;
-
-                    var attributes = document.FindAttributeByGrip(
-                        mouseEvent.CanvasLocation, true, true, true, (int)GhOps.GripHitRadius);
-                    if (attributes?.DocObject is IGH_Param grip)
-                    {
-                        _gripParam = grip;
-                        _gripFromInput = IsInputGrip(grip, attributes, mouseEvent.CanvasX);
-                    }
-
+                    ResetWireDrag();
                     return;
                 }
+
+                _wireDragArmed = true;
+
+                // GH_WireInteraction updates its target on every mouse move and does not
+                // re-test it on mouse-up, so the last move is the state it will act on.
+                UpdateWireDragTarget(new GH_CanvasMouseEvent(canvas.Viewport, e));
+                return;
             }
+
+            // The wire interaction ended or was replaced before the release we act on.
+            ResetWireDrag();
         }
 
         public void OnMouseUp(object sender, MouseEventArgs e)
         {
             var canvas = _canvas;
+            var source = _wireDragSource;
+            var fromInput = _wireDragFromInput;
+            var openSearch = _wireDragArmed && !_wireDragHasTarget;
+
+            ResetWireDrag();
+
+            if (!openSearch || source == null || e.Button != MouseButtons.Left)
+                return;
+
+            // MouseUp is subscribed after Grasshopper's handler, so a normally completed
+            // wire drag has already been destroyed here. If it is still active, GH did not
+            // finish the drag normally (for example a Rhino 9 search or disabled interaction)
+            // and we must not open a second popup.
+            if (canvas.ActiveInteraction is GH_WireInteraction)
+                return;
+
+            if (!canvas.ClientRectangle.Contains(e.Location))
+                return;
+
             var document = canvas.Document;
-            if (document == null || e.Button != MouseButtons.Left)
-                return;
-
-            var grip = _gripParam;
-            var gripFromInput = _gripFromInput;
-            _gripParam = null;
-
-            // Blender link-drag search: a wire was dragged off a socket and dropped on empty
-            // canvas. Grasshopper already released its wire interaction without connecting,
-            // so open the search popup and remember the socket for auto-connection.
-            if (grip == null)
-                return;
-
-            var movedPixels = Math.Abs(e.X - _downControl.X) + Math.Abs(e.Y - _downControl.Y);
-            if (movedPixels <= DragSlopPixels)
-                return;
-
-            var mouseEvent = new GH_CanvasMouseEvent(canvas.Viewport, e);
-            if (canvas.ActiveInteraction != null || !IsEmptyCanvas(document, mouseEvent.CanvasLocation))
+            if (document == null)
                 return;
 
             var dialog = OpenSearch(canvas, canvas.PointToScreen(e.Location));
-            if (dialog != null)
-                _pending = new PendingConnect(grip, gripFromInput, dialog);
+            if (dialog != null && !dialog.IsDisposed)
+                _pending = new PendingConnect(source, fromInput, dialog);
         }
 
         public void OnKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode != Keys.Escape)
-                return;
+            switch (e.KeyCode)
+            {
+                case Keys.Escape:
+                    _pending = null;
+                    ResetWireDrag();
+                    break;
 
-            _gripParam = null;
-            _pending = null;
+                // Rhino 9 uses Space to open its own link search while a wire is being
+                // dragged, and Alt to turn an empty drop into a Relay. Grasshopper handles
+                // those paths; do not also open our search on the subsequent release.
+                case Keys.Space:
+                case Keys.Menu:
+                    ResetWireDrag();
+                    break;
+            }
         }
 
         public void OnDocumentObjectsAdded(GH_Document sender, GH_DocObjectEventArgs e)
@@ -153,6 +180,85 @@ namespace Blendify
 
             _pending = null;
             GhOps.ConnectToNewObject(sender, added, pending.Param, pending.FromInput);
+        }
+
+        /// <summary>
+        /// Recovers the socket Grasshopper is dragging from. GH_WireInteraction exposes the
+        /// mouse-down point publicly but not its source, so ask the document the same
+        /// question Grasshopper asked when it started the drag.
+        /// </summary>
+        private bool TryCaptureWireDragSource(GH_WireInteraction wire)
+        {
+            if (_wireDragSource != null)
+                return true;
+
+            var document = _canvas.Document;
+            if (document == null)
+                return false;
+
+            var grip = document.RelevantObjectAtPoint(wire.CanvasPointDown);
+            if (grip == null)
+                return false;
+
+            switch (grip.ObjectType)
+            {
+                case GH_ObjectSpecies.grip_in:
+                case GH_ObjectSpecies.grip_out:
+                case GH_ObjectSpecies.grip:
+                    break;
+                default:
+                    return false;
+            }
+
+            var param = grip.Parameter;
+            if (param?.Attributes == null)
+                return false;
+
+            _wireDragSource = param;
+            _wireDragFromInput = IsInputGrip(param, param.Attributes, wire.CanvasPointDown.X);
+            return true;
+        }
+
+        /// <summary>
+        /// Mirrors GH_WireInteraction.RespondToMouseMove: a release connects when the last
+        /// move found a grip on a different top-level object.
+        /// </summary>
+        private void UpdateWireDragTarget(GH_CanvasMouseEvent e)
+        {
+            var document = _canvas.Document;
+            var source = _wireDragSource;
+            if (document == null || source?.Attributes == null)
+            {
+                _wireDragHasTarget = false;
+                return;
+            }
+
+            var target = document.FindAttributeByGrip(
+                e.CanvasLocation,
+                false,
+                !_wireDragFromInput,
+                _wireDragFromInput,
+                WireTargetSearchRadius);
+
+            if (target == null || !(target.DocObject is IGH_Param))
+            {
+                _wireDragHasTarget = false;
+                return;
+            }
+
+            var sourceTopLevel = source.Attributes.GetTopLevel?.DocObject;
+            var targetTopLevel = target.GetTopLevel?.DocObject;
+            _wireDragHasTarget = sourceTopLevel != null
+                && targetTopLevel != null
+                && !ReferenceEquals(targetTopLevel, sourceTopLevel);
+        }
+
+        private void ResetWireDrag()
+        {
+            _wireDragArmed = false;
+            _wireDragHasTarget = false;
+            _wireDragSource = null;
+            _wireDragFromInput = false;
         }
 
         /// <summary>Opens Grasshopper's native component search popup, centred on a screen point.</summary>
@@ -183,15 +289,6 @@ namespace Blendify
             else
                 dialog.Show();
             return dialog;
-        }
-
-        private static bool IsEmptyCanvas(GH_Document document, PointF point)
-        {
-            if (document.RelevantObjectAtPoint(point) != null)
-                return false;
-
-            IGH_Param source = null, target = null;
-            return !document.FindWireAt(point, GhOps.WireHitRadius, ref source, ref target);
         }
 
         private static bool IsInputGrip(IGH_Param param, IGH_Attributes attributes, float canvasX)

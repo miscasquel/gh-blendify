@@ -1,6 +1,6 @@
 # Blendify
 
-**v0.2.0 — work in progress.** This project is under active development: expect rough
+**v0.2.1 — work in progress.** This project is under active development: expect rough
 edges and breaking changes.
 
 Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
@@ -12,7 +12,7 @@ Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
 | **Middle mouse drag** | Pan the canvas (replaces GH's MMB radial menu; space bar still opens it). |
 | **Shift + right-drag across wires** | On release, insert one Relay per distinct source output among the wires the stroke crosses. Each relay is placed at the midpoint of the stroke/wire intersections for its source and reroutes that source's swept links through itself (one undo step). A trail and wire highlights preview the relays while dragging; a plain Shift+RMB click does nothing. |
 | **Ctrl + right-drag across wires** | Cut every wire the stroke crosses (single undo step). |
-| **Drag from a socket, drop on empty canvas** | Open the component search; the created component is auto-connected to that socket when a compatible one exists. |
+| **Drag a wire from a socket and release without connecting** | Open the component search; the created component is auto-connected to that socket when a compatible one exists. |
 
 Everything else stays stock Grasshopper: right-click menus, wheel zoom, left-drag
 selection, double-click search, `Ctrl+Z` undo (all Blendify edits are undoable).
@@ -59,6 +59,11 @@ with Rhino, so there is nothing else to install.
 - The link-search popup is Grasshopper's own search dialog, so the hit list is not
   type-filtered; Blendify picks the best compatible socket on the new component and
   wires it automatically (exact type match > assignable > generic).
+- The link-search popup opens whenever a wire drag ends without Grasshopper making a
+  connection, even when the release is over a group or another wire. Releasing outside the
+  canvas or cancelling with `Esc` does not open it.
+- In Rhino 9, `Space` during a wire drag and `Alt`+drop are handled by Grasshopper itself;
+  Blendify stays out of those paths.
 - A Shift+RMB relay is created per distinct source output, so streams from different
   outputs are not merged. The relay is placed at the midpoint of that output's
   stroke/wire intersections.

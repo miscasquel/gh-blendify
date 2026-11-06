@@ -35,6 +35,7 @@ namespace Blendify
             // run afterwards and see whatever the default behaviour already prepared
             // (e.g. a pending pan/zoom interaction or the radial menu).
             canvas.MouseDown += state.OnMouseDown;
+            canvas.MouseMove += state.OnMouseMove;
             canvas.MouseUp += state.OnMouseUp;
             canvas.KeyDown += state.OnKeyDown;
             canvas.Document_ObjectsAdded += state.OnDocumentObjectsAdded;
