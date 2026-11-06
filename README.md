@@ -1,7 +1,5 @@
 # Blendify
 
-**v0.2.1 — work in progress.** This project is under active development: expect rough
-edges and breaking changes.
 
 Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
 
