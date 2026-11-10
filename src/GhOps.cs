@@ -25,6 +25,27 @@ namespace Blendify
         public readonly IGH_Param Target;
     }
 
+    /// <summary>A prepared insertion of a document object into an existing wire.</summary>
+    internal readonly struct WireInsertion
+    {
+        public WireInsertion(IGH_Param wireSource, IGH_Param wireTarget, IGH_Param input, IGH_Param output)
+        {
+            WireSource = wireSource;
+            WireTarget = wireTarget;
+            Input = input;
+            Output = output;
+        }
+
+        public readonly IGH_Param WireSource;
+        public readonly IGH_Param WireTarget;
+
+        /// <summary>Free input on the inserted object, or null when it has none.</summary>
+        public readonly IGH_Param Input;
+
+        /// <summary>Free output on the inserted object that feeds the wire target.</summary>
+        public readonly IGH_Param Output;
+    }
+
     /// <summary>
     /// Wire geometry and document mutations.
     ///
@@ -440,6 +461,218 @@ namespace Blendify
             target.AddSource(source);
             document.NewSolution(false);
             return true;
+        }
+
+        /// <summary>
+        /// Whether an object can be spliced onto a wire. Its outputs must all be free;
+        /// inputs may already be connected. A free input is optional because Blender also
+        /// allows nodes without inputs to be inserted on the output side.
+        /// </summary>
+        public static bool IsOutputSideUnconnected(IGH_DocumentObject obj)
+        {
+            switch (obj)
+            {
+                case IGH_Component component:
+                    if (component.Params.Output.Count == 0)
+                        return false;
+                    foreach (var output in component.Params.Output)
+                    {
+                        if (output.Recipients != null && output.Recipients.Count > 0)
+                            return false;
+                    }
+                    return true;
+
+                case IGH_Param param:
+                    var attributes = param.Attributes;
+                    if (attributes != null && !attributes.HasOutputGrip)
+                        return false;
+                    return param.Recipients == null || param.Recipients.Count == 0;
+
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Whether none of an object's inputs are connected. The wire's source is only
+        /// wired into the object when this is true; otherwise its input wiring is left
+        /// untouched and only the downstream side is reconnected.
+        /// </summary>
+        public static bool IsInputSideUnconnected(IGH_DocumentObject obj)
+        {
+            switch (obj)
+            {
+                case IGH_Component component:
+                    foreach (var input in component.Params.Input)
+                    {
+                        if (input.SourceCount != 0)
+                            return false;
+                    }
+                    return true;
+
+                case IGH_Param param:
+                    return !HasInputGrip(param) || param.SourceCount == 0;
+
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Finds the wire under a canvas point and prepares an insertion for the object.
+        /// The wire's source feeds a free node input only when none of its inputs are
+        /// connected. Otherwise just the downstream side is connected to the object's
+        /// output, leaving the old source unconnected.
+        /// </summary>
+        public static bool TryFindWireInsertion(
+            GH_Document document,
+            IGH_DocumentObject obj,
+            PointF point,
+            float radius,
+            out WireInsertion insertion)
+        {
+            insertion = default(WireInsertion);
+            if (document == null || obj == null || !IsOutputSideUnconnected(obj))
+                return false;
+
+            IGH_Param wireSource = null;
+            IGH_Param wireTarget = null;
+            if (!document.FindWireAt(point, radius, ref wireSource, ref wireTarget))
+                return false;
+            if (wireSource == null || wireTarget == null)
+                return false;
+
+            // Never splice an object onto one of its own wires.
+            if (OwnsParam(obj, wireSource) || OwnsParam(obj, wireTarget))
+                return false;
+
+            // Feeding the wire target from this object must not create a cycle.
+            if (obj is IGH_ActiveObject active
+                && wireTarget.Attributes?.GetTopLevel?.DocObject is IGH_ActiveObject targetObject
+                && active.DependsOn(targetObject))
+                return false;
+
+            var output = FindBestOutput(obj, wireTarget);
+            if (output == null)
+                return false;
+
+            var input = IsInputSideUnconnected(obj) ? FindBestFreeInput(obj, wireSource) : null;
+            insertion = new WireInsertion(wireSource, wireTarget, input, output);
+            return true;
+        }
+
+        /// <summary>Applies a prepared wire insertion in one undo step.</summary>
+        public static void InsertIntoWire(GH_Document document, WireInsertion insertion)
+        {
+            if (document == null
+                || insertion.WireSource == null
+                || insertion.WireTarget == null
+                || insertion.Output == null)
+                return;
+
+            var record = new GH_UndoRecord("Blendify: Insert Into Wire");
+            var recorded = new HashSet<IGH_Param>(ReferenceEqualityComparer.Instance);
+
+            if (insertion.Input != null && recorded.Add(insertion.Input))
+                record.AddAction(new GH_WireAction(insertion.Input));
+            if (recorded.Add(insertion.WireTarget))
+                record.AddAction(new GH_WireAction(insertion.WireTarget));
+
+            document.UndoUtil.RecordEvent(record);
+
+            if (insertion.Input != null)
+                insertion.Input.AddSource(insertion.WireSource);
+
+            insertion.WireTarget.ReplaceSource(insertion.WireSource, insertion.Output);
+
+            document.NewSolution(false);
+        }
+
+        private static IGH_Param FindBestOutput(IGH_DocumentObject obj, IGH_Param wireTarget)
+        {
+            IGH_Param best = null;
+            int bestScore = int.MinValue;
+
+            if (obj is IGH_Component component)
+            {
+                foreach (var candidate in component.Params.Output)
+                {
+                    if (!HasOutputGrip(candidate) || !IsFreeOutput(candidate))
+                        continue;
+                    int score = CompatibilityScore(candidate, wireTarget);
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        best = candidate;
+                    }
+                }
+            }
+            else if (obj is IGH_Param param)
+            {
+                if (HasOutputGrip(param) && IsFreeOutput(param))
+                    best = param;
+            }
+
+            return best;
+        }
+
+        private static IGH_Param FindBestFreeInput(IGH_DocumentObject obj, IGH_Param wireSource)
+        {
+            IGH_Param best = null;
+            int bestScore = int.MinValue;
+
+            if (obj is IGH_Component component)
+            {
+                foreach (var candidate in component.Params.Input)
+                {
+                    if (!HasInputGrip(candidate) || !IsFreeInput(candidate))
+                        continue;
+                    int score = CompatibilityScore(candidate, wireSource);
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        best = candidate;
+                    }
+                }
+            }
+            else if (obj is IGH_Param param)
+            {
+                if (HasInputGrip(param) && IsFreeInput(param))
+                    best = param;
+            }
+
+            return best;
+        }
+
+        private static bool HasInputGrip(IGH_Param param)
+            => param.Attributes == null || param.Attributes.HasInputGrip;
+
+        private static bool HasOutputGrip(IGH_Param param)
+            => param.Attributes == null || param.Attributes.HasOutputGrip;
+
+        private static bool IsFreeInput(IGH_Param param) => param.SourceCount == 0;
+
+        private static bool IsFreeOutput(IGH_Param param)
+            => param.Recipients == null || param.Recipients.Count == 0;
+
+        private static bool OwnsParam(IGH_DocumentObject obj, IGH_Param param)
+        {
+            if (param == null)
+                return false;
+            if (ReferenceEquals(obj, param))
+                return true;
+
+            if (obj is IGH_Component component)
+            {
+                foreach (var input in component.Params.Input)
+                    if (ReferenceEquals(input, param))
+                        return true;
+                foreach (var output in component.Params.Output)
+                    if (ReferenceEquals(output, param))
+                        return true;
+            }
+
+            return false;
         }
 
         private static IGH_Param FindCompatibleParam(IGH_DocumentObject obj, IGH_Param other, bool wantOutput)

@@ -1,6 +1,5 @@
 # Blendify
 
-
 Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
 
 ## What it does
@@ -11,6 +10,7 @@ Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
 | **Shift + right-drag across wires** | On release, insert one Relay per distinct source output among the wires the stroke crosses. Each relay is placed at the midpoint of the stroke/wire intersections for its source and reroutes that source's swept links through itself (one undo step). A trail and wire highlights preview the relays while dragging; a plain Shift+RMB click does nothing. |
 | **Ctrl + right-drag across wires** | Cut every wire the stroke crosses (single undo step). |
 | **Drag a wire from a socket and release without connecting** | Open the component search; the created component is auto-connected to that socket when a compatible one exists. |
+| **Drag a node with free outputs onto a wire** | Insert/splice it into the wire. The wire highlights while dragging: the wire's source feeds a free node input only when none of the node's inputs are connected, and the node's output replaces the wire's target source. Otherwise the old source is left unconnected. |
 
 Everything else stays stock Grasshopper: right-click menus, wheel zoom, left-drag
 selection, double-click search, `Ctrl+Z` undo (all Blendify edits are undoable).
@@ -60,6 +60,12 @@ with Rhino, so there is nothing else to install.
 - The link-search popup opens whenever a wire drag ends without Grasshopper making a
   connection, even when the release is over a group or another wire. Releasing outside the
   canvas or cancelling with `Esc` does not open it.
+- Wire auto-insert applies to exactly one selected top-level component or parameter whose
+  outputs are all unconnected. If none of its inputs are connected, the wire's old source
+  feeds a free input. If any input is already wired, its inputs are left untouched and only
+  the downstream side is reconnected, leaving the old source unconnected; the cable is
+  effectively cut upstream. Hold `Alt` on release to suppress the automatic connection.
+  Dragging a multi-object selection never auto-inserts.
 - In Rhino 9, `Space` during a wire drag and `Alt`+drop are handled by Grasshopper itself;
   Blendify stays out of those paths.
 - A Shift+RMB relay is created per distinct source output, so streams from different

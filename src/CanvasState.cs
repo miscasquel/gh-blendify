@@ -3,6 +3,7 @@
 
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using Grasshopper.GUI;
 using Grasshopper.GUI.Canvas;
@@ -20,11 +21,25 @@ namespace Blendify
     ///   Ctrl + RMB drag across wires  cut them
     ///   drag a wire from a socket     open component search and auto-connect
     ///   and release unconnected       the created component
+    ///   drop a node with free         insert it into the wire under the cursor
+    ///   outputs onto a wire
     /// </summary>
     internal sealed class CanvasState
     {
         // GH_WireInteraction searches this far for the socket a wire would connect to.
         private const int WireTargetSearchRadius = 20;
+
+        // Canvas-unit radius for finding the wire under a dragged object.
+        private const float WireDropSearchRadius = 8f;
+
+        // Control-pixel travel before a left press counts as a drag.
+        private const int InsertDragThreshold = 4;
+
+        private static readonly Pen InsertPen = new Pen(Color.FromArgb(255, 255, 200, 40), 3.5f)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+        };
 
         private readonly GH_Canvas _canvas;
 
@@ -38,9 +53,19 @@ namespace Blendify
         // Link-drag search: the socket a wire was pulled from.
         private PendingConnect _pending;
 
+        // Left-drag insertion: the top-level object under the press and the wire the
+        // cursor is currently offering to splice it into.
+        private bool _leftDown;
+        private Point _leftDownControl;
+        private IGH_DocumentObject _insertCandidate;
+        private PointF _leftDownPivot;
+        private bool _leftDownPivotValid;
+        private WireInsertion? _insertHover;
+
         public CanvasState(GH_Canvas canvas)
         {
             _canvas = canvas;
+            canvas.CanvasPostPaintObjects += DrawInsertHighlight;
         }
 
         public void OnMouseDown(object sender, MouseEventArgs e)
@@ -50,6 +75,7 @@ namespace Blendify
 
             _pending = null;
             ResetWireDrag();
+            ResetWireInsert();
 
             if (document == null || !canvas.ModifiersEnabled)
                 return;
@@ -58,6 +84,10 @@ namespace Blendify
 
             switch (e.Button)
             {
+                case MouseButtons.Left:
+                    BeginInsertTracking(mouseEvent);
+                    return;
+
                 case MouseButtons.Middle:
                     // Blender: MMB drag pans. Normally MmbInputFilter claims the button
                     // before GH sees it; this is the fallback if the filter is unavailable.
@@ -111,16 +141,34 @@ namespace Blendify
 
             // The wire interaction ended or was replaced before the release we act on.
             ResetWireDrag();
+
+            // A lost MouseUp (for example after the cursor leaves the control) must not
+            // leave stale insertion state behind.
+            if (_leftDown && (Control.MouseButtons & MouseButtons.Left) == MouseButtons.None)
+                ResetWireInsert();
+            else
+                UpdateInsertHover(new GH_CanvasMouseEvent(canvas.Viewport, e));
         }
 
         public void OnMouseUp(object sender, MouseEventArgs e)
         {
             var canvas = _canvas;
+            var insertion = e.Button == MouseButtons.Left ? CaptureInsertionOnMouseUp(e) : (WireInsertion?)null;
             var source = _wireDragSource;
             var fromInput = _wireDragFromInput;
             var openSearch = _wireDragArmed && !_wireDragHasTarget;
 
             ResetWireDrag();
+
+            if (insertion.HasValue)
+            {
+                var insertDocument = canvas.Document;
+                if (insertDocument != null)
+                {
+                    GhOps.InsertIntoWire(insertDocument, insertion.Value);
+                    canvas.Invalidate();
+                }
+            }
 
             if (!openSearch || source == null || e.Button != MouseButtons.Left)
                 return;
@@ -151,6 +199,7 @@ namespace Blendify
                 case Keys.Escape:
                     _pending = null;
                     ResetWireDrag();
+                    ResetWireInsert();
                     break;
 
                 // Rhino 9 uses Space to open its own link search while a wire is being
@@ -180,6 +229,153 @@ namespace Blendify
 
             _pending = null;
             GhOps.ConnectToNewObject(sender, added, pending.Param, pending.FromInput);
+        }
+
+        private void BeginInsertTracking(GH_CanvasMouseEvent e)
+        {
+            _leftDown = true;
+            _leftDownControl = e.ControlLocation;
+            _insertCandidate = FindTopLevelObjectAt(_canvas.Document, e.CanvasLocation);
+
+            var attributes = _insertCandidate?.Attributes;
+            _leftDownPivotValid = attributes != null;
+            _leftDownPivot = _leftDownPivotValid ? attributes.Pivot : PointF.Empty;
+        }
+
+        private WireInsertion? CaptureInsertionOnMouseUp(MouseEventArgs e)
+        {
+            WireInsertion? result = null;
+            if (_leftDown && _insertCandidate != null)
+            {
+                var mouseEvent = new GH_CanvasMouseEvent(_canvas.Viewport, e);
+                if (TryGetInsertionAt(mouseEvent, out var insertion))
+                    result = insertion;
+            }
+
+            ResetWireInsert();
+            return result;
+        }
+
+        private void UpdateInsertHover(GH_CanvasMouseEvent e)
+        {
+            WireInsertion? hover = null;
+            if (TryGetInsertionAt(e, out var insertion))
+                hover = insertion;
+
+            if (!SameInsertion(hover, _insertHover))
+            {
+                _insertHover = hover;
+                _canvas.Invalidate();
+            }
+        }
+
+        private bool TryGetInsertionAt(GH_CanvasMouseEvent e, out WireInsertion insertion)
+        {
+            insertion = default(WireInsertion);
+            var canvas = _canvas;
+            var document = canvas.Document;
+            var candidate = _insertCandidate;
+
+            if (!_leftDown || candidate == null || document == null)
+                return false;
+            if ((Control.ModifierKeys & Keys.Alt) != Keys.None)
+                return false;
+            if (!HasDraggedFarEnough(e.ControlLocation))
+                return false;
+            if (!CandidateHasMoved(candidate))
+                return false;
+            if (!canvas.ClientRectangle.Contains(e.ControlLocation))
+                return false;
+            if (document.SelectedCount != 1)
+                return false;
+
+            return GhOps.TryFindWireInsertion(document, candidate, e.CanvasLocation, WireDropSearchRadius, out insertion);
+        }
+
+        private bool HasDraggedFarEnough(Point control)
+        {
+            return Math.Abs(control.X - _leftDownControl.X)
+                + Math.Abs(control.Y - _leftDownControl.Y) > InsertDragThreshold;
+        }
+
+        private bool CandidateHasMoved(IGH_DocumentObject candidate)
+        {
+            if (!_leftDownPivotValid || candidate?.Attributes == null)
+                return false;
+
+            var pivot = candidate.Attributes.Pivot;
+            return Math.Abs(pivot.X - _leftDownPivot.X)
+                + Math.Abs(pivot.Y - _leftDownPivot.Y) > 0.5f;
+        }
+
+        private void ResetWireInsert()
+        {
+            _leftDown = false;
+            _insertCandidate = null;
+            _leftDownPivotValid = false;
+            if (_insertHover.HasValue)
+            {
+                _insertHover = null;
+                _canvas.Invalidate();
+            }
+        }
+
+        private static IGH_DocumentObject FindTopLevelObjectAt(GH_Document document, PointF canvasPoint)
+        {
+            if (document == null)
+                return null;
+
+            var data = document.RelevantObjectAtPoint(canvasPoint);
+            if (data?.TopLevelObject == null)
+                return null;
+
+            switch (data.ObjectType)
+            {
+                // Components and floating parameters report doc_object when their body
+                // (rather than a grip or balloon) is picked.
+                case GH_ObjectSpecies.doc_object:
+                case GH_ObjectSpecies.component:
+                case GH_ObjectSpecies.parameter:
+                    break;
+                default:
+                    return null;
+            }
+
+            var obj = data.TopLevelObject;
+            return obj is IGH_Component || obj is IGH_Param ? obj : null;
+        }
+
+        private static bool SameInsertion(WireInsertion? a, WireInsertion? b)
+        {
+            if (!a.HasValue || !b.HasValue)
+                return a.HasValue == b.HasValue;
+
+            var first = a.Value;
+            var second = b.Value;
+            return ReferenceEquals(first.WireSource, second.WireSource)
+                && ReferenceEquals(first.WireTarget, second.WireTarget)
+                && ReferenceEquals(first.Input, second.Input)
+                && ReferenceEquals(first.Output, second.Output);
+        }
+
+        private void DrawInsertHighlight(GH_Canvas sender)
+        {
+            var insertion = _insertHover;
+            if (!insertion.HasValue)
+                return;
+
+            var graphics = sender.Graphics;
+            if (graphics == null)
+                return;
+
+            var sourceAttributes = insertion.Value.WireSource?.Attributes;
+            var targetAttributes = insertion.Value.WireTarget?.Attributes;
+            if (sourceAttributes == null || targetAttributes == null)
+                return;
+
+            graphics.DrawLines(
+                InsertPen,
+                GhOps.WirePolyline(sourceAttributes.OutputGrip, targetAttributes.InputGrip));
         }
 
         /// <summary>
