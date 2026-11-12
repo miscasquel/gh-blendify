@@ -1,6 +1,6 @@
 # Blendify
 
-Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows).
+Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows and Linux using wine).
 
 ## What it does
 
@@ -26,8 +26,7 @@ selection, double-click search, `Ctrl+Z` undo (all Blendify edits are undoable).
 
 This is a personal, opinionated project, published openly in case someone finds it
 useful. It deliberately replaces a few stock Grasshopper gestures with Blender-style ones
-(see Notes), and it only implements what its author actually uses. Feature requests may
-be ignored; forks are welcome.
+(see Notes). Feature requests are welcome.
 
 ## Install
 
