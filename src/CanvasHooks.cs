@@ -25,8 +25,13 @@ namespace Blendify
             if (States.TryGetValue(canvas, out _))
                 return;
 
+            ProfilerOverlay.Install();
+
             var state = new CanvasState(canvas);
             States.Add(canvas, state);
+
+            // The canvas keeps the overlay alive through its paint-event subscriptions.
+            _ = new ProfilerOverlay(canvas);
 
             // Backstop in case the message filter is bypassed by the host's message loop.
             canvas.AddValidator(new MmbCanvasValidator());

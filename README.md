@@ -12,6 +12,10 @@ Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows an
 | **Drag a wire from a socket and release without connecting** | Open the component search; the created component is auto-connected to that socket when a compatible one exists. |
 | **Drag a node with free outputs onto a wire** | Insert/splice it into the wire. The wire highlights while dragging: the wire's source feeds a free node input only when none of the node's inputs are connected, and the node's output replaces the wire's target source. Otherwise the old source is left unconnected. |
 
+With Grasshopper's Profiler widget enabled (*Display → Canvas Widgets → Profiler*),
+Blendify replaces its speech-balloon tags with compact, color-coded solve-time labels
+above every component. Parameters such as sliders and panels are not labelled.
+
 Everything else stays stock Grasshopper: right-click menus, wheel zoom, left-drag
 selection, double-click search, `Ctrl+Z` undo (all Blendify edits are undoable).
 
@@ -71,6 +75,12 @@ with Rhino, so there is nothing else to install.
   outputs are not merged. The relay is placed at the midpoint of that output's
   stroke/wire intersections.
 - Shift+RMB only inserts relays while dragging; a click with no movement does nothing.
+- With the Profiler widget visible, Blendify replaces its balloons with a tiny `ms` label
+  above each component: neutral gray below `0.05 ms`, green below `5 ms`, amber below
+  `50 ms` and red from `50 ms` up. Sliders, panels and other parameters are not labelled.
+  Native profiler tags are suppressed while Blendify is loaded, and the Profiler widget
+  itself remains the on/off switch. Labels are skipped in canvas thumbnails and image
+  exports.
 
 ## Build
 
@@ -97,6 +107,7 @@ src/
   GhOps.cs                     wire geometry, relay insertion, connect/cut with undo
   MmbInputFilter.cs            claims MMB before Grasshopper's canvas handler
   MmbCanvasValidator.cs        suppresses GH's MMB canvas menu as a backstop
+  ProfilerOverlay.cs           compact solve-time labels over components
   Interactions/
     MmbPanInteraction.cs       Blender-style middle-mouse pan
     RelayInteraction.cs        Shift+RMB reroute insertion
