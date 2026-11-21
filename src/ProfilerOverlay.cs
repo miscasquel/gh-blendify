@@ -2,6 +2,7 @@
 // Copyright (C) 2026 miscasquel
 
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Text;
 using System.Globalization;
@@ -9,12 +10,13 @@ using Grasshopper;
 using Grasshopper.GUI.Canvas;
 using Grasshopper.GUI.Widgets;
 using Grasshopper.Kernel;
+using Grasshopper.Kernel.Special;
 
 namespace Blendify
 {
     /// <summary>
-    /// Replaces Grasshopper's profiler speech balloons with a compact solve-time label
-    /// above every component.
+    /// Replaces Grasshopper's profiler speech balloons with compact solve-time labels
+    /// above every component and a summed total below every group.
     ///
     /// The Profiler widget remains the on/off switch. While it is visible, its native
     /// balloon tags are suppressed for the duration of each widget paint and restored
@@ -34,6 +36,11 @@ namespace Blendify
 
         // Skip labels on components that would be too narrow to read at this zoom.
         private const float MinimumComponentWidth = 24f;
+
+        // Group totals are right-aligned below the border; keep enough width for
+        // the total to remain readable.
+        private const float MinimumGroupWidth = 64f;
+        private const float GroupLabelInset = 4f;
 
         private const float LabelGap = 2f;
 
@@ -58,6 +65,11 @@ namespace Blendify
             Alignment = StringAlignment.Center,
             LineAlignment = StringAlignment.Center,
             FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.NoClip,
+        };
+
+        private static readonly StringFormat GroupLabelFormat = new StringFormat(LabelFormat)
+        {
+            Alignment = StringAlignment.Far,
         };
 
         private static bool _installed;
@@ -124,42 +136,121 @@ namespace Blendify
 
                 foreach (var obj in document.Objects)
                 {
+                    if (obj is GH_Group group)
+                    {
+                        if (!TryGetScreenBounds(canvas, group, MinimumGroupWidth, out var groupBounds))
+                            continue;
+
+                        double groupMilliseconds = GroupMilliseconds(group);
+                        DrawGroupLabel(
+                            graphics,
+                            groupBounds,
+                            "Σ " + FormatMilliseconds(groupMilliseconds),
+                            SelectBrush(groupMilliseconds, darkCanvas),
+                            font,
+                            fontHeight);
+                        continue;
+                    }
+
                     if (!(obj is IGH_Component component))
                         continue;
-
-                    var attributes = component.Attributes;
-                    if (attributes == null)
-                        continue;
-
-                    var bounds = attributes.Bounds;
-                    if (bounds.Width <= 0f || bounds.Height <= 0f)
-                        continue;
-
-                    var projected = canvas.Viewport.ProjectRectangle(bounds);
-                    if (projected.Width < MinimumComponentWidth)
-                        continue;
-                    if (!projected.IntersectsWith(canvas.ClientRectangle))
+                    if (!TryGetScreenBounds(canvas, component, MinimumComponentWidth, out var projected))
                         continue;
 
                     double milliseconds = component.ProcessorTime.TotalMilliseconds;
                     if (double.IsNaN(milliseconds) || milliseconds < 0.0)
                         milliseconds = 0.0;
 
-                    var label = FormatMilliseconds(milliseconds);
-                    var brush = SelectBrush(milliseconds, darkCanvas);
-                    var labelBounds = new RectangleF(
-                        projected.X - LabelOverhang,
-                        projected.Top - fontHeight - LabelGap,
-                        projected.Width + 2f * LabelOverhang,
-                        fontHeight + LabelGap);
-
-                    graphics.DrawString(label, font, brush, labelBounds, LabelFormat);
+                    DrawLabel(
+                        graphics,
+                        projected,
+                        FormatMilliseconds(milliseconds),
+                        SelectBrush(milliseconds, darkCanvas),
+                        font,
+                        fontHeight);
                 }
             }
             finally
             {
                 graphics.Restore(state);
             }
+        }
+
+        private static bool TryGetScreenBounds(
+            GH_Canvas canvas,
+            IGH_DocumentObject obj,
+            float minimumWidth,
+            out RectangleF projected)
+        {
+            projected = RectangleF.Empty;
+
+            var attributes = obj.Attributes;
+            if (attributes == null)
+                return false;
+
+            var bounds = attributes.Bounds;
+            if (bounds.Width <= 0f || bounds.Height <= 0f)
+                return false;
+
+            projected = canvas.Viewport.ProjectRectangle(bounds);
+            if (projected.Width < minimumWidth)
+                return false;
+            return projected.IntersectsWith(canvas.ClientRectangle);
+        }
+
+        private static void DrawLabel(
+            Graphics graphics,
+            RectangleF projected,
+            string label,
+            Brush brush,
+            Font font,
+            int fontHeight)
+        {
+            var labelBounds = new RectangleF(
+                projected.X - LabelOverhang,
+                projected.Top - fontHeight - LabelGap,
+                projected.Width + 2f * LabelOverhang,
+                fontHeight + LabelGap);
+
+            graphics.DrawString(label, font, brush, labelBounds, LabelFormat);
+        }
+
+        private static void DrawGroupLabel(
+            Graphics graphics,
+            RectangleF projected,
+            string label,
+            Brush brush,
+            Font font,
+            int fontHeight)
+        {
+            // Place the total just below the border, right-aligned, so it never
+            // collides with the group name tag above the group.
+            var labelBounds = new RectangleF(
+                projected.X + GroupLabelInset,
+                projected.Bottom + LabelGap,
+                projected.Width - 2f * GroupLabelInset,
+                fontHeight + LabelGap);
+
+            graphics.DrawString(label, font, brush, labelBounds, GroupLabelFormat);
+        }
+
+        private static double GroupMilliseconds(GH_Group group)
+        {
+            // Group totals are the sum of component solve times. Parameters are
+            // already included in their consuming component's ProcessorTime, so
+            // counting them again would double-count.
+            double total = 0.0;
+            var seen = new HashSet<IGH_Component>(ReferenceEqualityComparer.Instance);
+            foreach (var obj in group.ObjectsRecursive())
+            {
+                if (!(obj is IGH_Component component) || !seen.Add(component))
+                    continue;
+
+                double milliseconds = component.ProcessorTime.TotalMilliseconds;
+                if (!double.IsNaN(milliseconds) && milliseconds > 0.0)
+                    total += milliseconds;
+            }
+            return total;
         }
 
         private static string FormatMilliseconds(double milliseconds)

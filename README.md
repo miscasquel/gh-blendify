@@ -14,7 +14,8 @@ Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows an
 
 With Grasshopper's Profiler widget enabled (*Display → Canvas Widgets → Profiler*),
 Blendify replaces its speech-balloon tags with compact, color-coded solve-time labels
-above every component. Parameters such as sliders and panels are not labelled.
+above every component and a `Σ` total below every group. Parameters such as sliders and
+panels are not labelled.
 
 Everything else stays stock Grasshopper: right-click menus, wheel zoom, left-drag
 selection, double-click search, `Ctrl+Z` undo (all Blendify edits are undoable).
@@ -78,9 +79,10 @@ with Rhino, so there is nothing else to install.
 - With the Profiler widget visible, Blendify replaces its balloons with a tiny `ms` label
   above each component: neutral gray below `0.05 ms`, green below `5 ms`, amber below
   `50 ms` and red from `50 ms` up. Sliders, panels and other parameters are not labelled.
-  Native profiler tags are suppressed while Blendify is loaded, and the Profiler widget
-  itself remains the on/off switch. Labels are skipped in canvas thumbnails and image
-  exports.
+  Groups show a `Σ` label with the sum of the solve times of the components inside them,
+  including nested groups. Native profiler tags are suppressed while Blendify is loaded,
+  and the Profiler widget itself remains the on/off switch. Labels are skipped in canvas
+  thumbnails and image exports.
 
 ## Build
 
