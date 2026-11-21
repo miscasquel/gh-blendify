@@ -14,8 +14,8 @@ Blender-style mouse controls for the Grasshopper canvas (Rhino 8 / 9, Windows an
 
 With Grasshopper's Profiler widget enabled (*Display → Canvas Widgets → Profiler*),
 Blendify replaces its speech-balloon tags with compact, color-coded solve-time labels
-above every component and a `Σ` total below every group. Parameters such as sliders and
-panels are not labelled.
+above components and a `Σ` total below groups. Parameters such as sliders and panels are
+not labelled.
 
 Everything else stays stock Grasshopper: right-click menus, wheel zoom, left-drag
 selection, double-click search, `Ctrl+Z` undo (all Blendify edits are undoable).
@@ -109,7 +109,7 @@ src/
   GhOps.cs                     wire geometry, relay insertion, connect/cut with undo
   MmbInputFilter.cs            claims MMB before Grasshopper's canvas handler
   MmbCanvasValidator.cs        suppresses GH's MMB canvas menu as a backstop
-  ProfilerOverlay.cs           compact solve-time labels over components
+  ProfilerOverlay.cs           compact solve-time labels over components and groups
   Interactions/
     MmbPanInteraction.cs       Blender-style middle-mouse pan
     RelayInteraction.cs        Shift+RMB reroute insertion

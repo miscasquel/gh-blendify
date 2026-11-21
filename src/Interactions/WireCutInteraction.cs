@@ -4,7 +4,6 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using Grasshopper.GUI;
 using Grasshopper.GUI.Canvas;
@@ -20,11 +19,6 @@ namespace Blendify
     internal sealed class WireCutInteraction : GH_AbstractInteraction
     {
         private static readonly Pen StrokePen = new Pen(Color.FromArgb(235, 255, 70, 70), 1.6f);
-        private static readonly Pen HitPen = new Pen(Color.FromArgb(255, 255, 200, 40), 3.5f)
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round,
-        };
 
         private readonly GH_Canvas _canvas;
         private readonly GH_Document _document;
@@ -79,14 +73,7 @@ namespace Blendify
             if (graphics == null)
                 return;
 
-            foreach (var wire in _hit)
-            {
-                var sourceAttributes = wire.Source.Attributes;
-                var targetAttributes = wire.Target.Attributes;
-                if (sourceAttributes == null || targetAttributes == null)
-                    continue;
-                graphics.DrawLines(HitPen, GhOps.WirePolyline(sourceAttributes.OutputGrip, targetAttributes.InputGrip));
-            }
+            GhOps.DrawWires(graphics, _hit, GhOps.WireHighlightPen);
 
             if (_stroke.Count > 1)
                 graphics.DrawLines(StrokePen, _stroke.ToArray());

@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Special;
 using Grasshopper.Kernel.Types;
@@ -59,6 +60,12 @@ namespace Blendify
         private const int DrawSampleCount = 24;
         private const int IntersectionSampleCount = 48;
 
+        public static readonly Pen WireHighlightPen = new Pen(Color.FromArgb(255, 255, 200, 40), 3.5f)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+        };
+
         private static float WireOffset(PointF source, PointF target)
         {
             float dy = 0.75f * Math.Abs(target.Y - source.Y);
@@ -90,7 +97,7 @@ namespace Blendify
         /// <summary>The point of the wire between two parameters that lies nearest to a canvas point.</summary>
         public static PointF NearestPointOnWire(IGH_Param source, IGH_Param target, PointF point)
         {
-            var curve = WirePolyline(source.Attributes.OutputGrip, target.Attributes.InputGrip, 48);
+            var curve = WirePolyline(source.Attributes.OutputGrip, target.Attributes.InputGrip, IntersectionSampleCount);
             var best = curve[0];
             float bestDistance = float.MaxValue;
             foreach (var candidate in curve)
@@ -105,6 +112,23 @@ namespace Blendify
                 }
             }
             return best;
+        }
+
+        /// <summary>Draws the given wires with a shared highlight pen.</summary>
+        public static void DrawWires(Graphics graphics, IReadOnlyList<WireInfo> wires, Pen pen)
+        {
+            if (graphics == null)
+                return;
+
+            foreach (var wire in wires)
+            {
+                var sourceAttributes = wire.Source?.Attributes;
+                var targetAttributes = wire.Target?.Attributes;
+                if (sourceAttributes == null || targetAttributes == null)
+                    continue;
+
+                graphics.DrawLines(pen, WirePolyline(sourceAttributes.OutputGrip, targetAttributes.InputGrip));
+            }
         }
 
         public static IEnumerable<WireInfo> EnumerateWires(GH_Document document)

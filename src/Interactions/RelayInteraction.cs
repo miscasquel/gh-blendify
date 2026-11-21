@@ -4,7 +4,6 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using Grasshopper.GUI;
 using Grasshopper.GUI.Canvas;
@@ -30,11 +29,6 @@ namespace Blendify
         private const float DragThreshold = 8f;          // below this the gesture counts as a click
 
         private static readonly Pen TrailPen = new Pen(Color.FromArgb(230, 90, 200, 255), 1.6f);
-        private static readonly Pen HitPen = new Pen(Color.FromArgb(255, 255, 200, 40), 3.5f)
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round,
-        };
 
         private readonly GH_Canvas _canvas;
         private readonly GH_Document _document;
@@ -117,14 +111,7 @@ namespace Blendify
             if (graphics == null)
                 return;
 
-            foreach (var wire in _hit)
-            {
-                var sourceAttributes = wire.Source.Attributes;
-                var targetAttributes = wire.Target.Attributes;
-                if (sourceAttributes == null || targetAttributes == null)
-                    continue;
-                graphics.DrawLines(HitPen, GhOps.WirePolyline(sourceAttributes.OutputGrip, targetAttributes.InputGrip));
-            }
+            GhOps.DrawWires(graphics, _hit, GhOps.WireHighlightPen);
 
             if (_stroke.Count > 1 && Travel() > DragThreshold)
                 graphics.DrawLines(TrailPen, _stroke.ToArray());

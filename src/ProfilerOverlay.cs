@@ -158,7 +158,7 @@ namespace Blendify
                         continue;
 
                     double milliseconds = component.ProcessorTime.TotalMilliseconds;
-                    if (double.IsNaN(milliseconds) || milliseconds < 0.0)
+                    if (milliseconds < 0.0)
                         milliseconds = 0.0;
 
                     DrawLabel(
@@ -240,6 +240,8 @@ namespace Blendify
             // already included in their consuming component's ProcessorTime, so
             // counting them again would double-count.
             double total = 0.0;
+            // A component can be both a direct member of a group and a member of
+            // one of its subgroups, so deduplicate before summing.
             var seen = new HashSet<IGH_Component>(ReferenceEqualityComparer.Instance);
             foreach (var obj in group.ObjectsRecursive())
             {
@@ -247,7 +249,7 @@ namespace Blendify
                     continue;
 
                 double milliseconds = component.ProcessorTime.TotalMilliseconds;
-                if (!double.IsNaN(milliseconds) && milliseconds > 0.0)
+                if (milliseconds > 0.0)
                     total += milliseconds;
             }
             return total;

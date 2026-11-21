@@ -11,8 +11,6 @@ namespace Blendify
         private static readonly ConditionalWeakTable<GH_Canvas, CanvasState> States =
             new ConditionalWeakTable<GH_Canvas, CanvasState>();
 
-        public static void OnCanvasCreated(GH_Canvas canvas) => Attach(canvas);
-
         public static void Attach(GH_Canvas canvas)
         {
             if (canvas == null)

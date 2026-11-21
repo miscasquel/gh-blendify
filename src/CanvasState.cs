@@ -3,7 +3,6 @@
 
 using System;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using Grasshopper.GUI;
 using Grasshopper.GUI.Canvas;
@@ -34,12 +33,6 @@ namespace Blendify
 
         // Control-pixel travel before a left press counts as a drag.
         private const int InsertDragThreshold = 4;
-
-        private static readonly Pen InsertPen = new Pen(Color.FromArgb(255, 255, 200, 40), 3.5f)
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round,
-        };
 
         private readonly GH_Canvas _canvas;
 
@@ -374,7 +367,7 @@ namespace Blendify
                 return;
 
             graphics.DrawLines(
-                InsertPen,
+                GhOps.WireHighlightPen,
                 GhOps.WirePolyline(sourceAttributes.OutputGrip, targetAttributes.InputGrip));
         }
 
